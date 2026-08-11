@@ -3,11 +3,30 @@
     Semua UI di sini, logic tinggal dipanggil dari callback.
 ]]
 
-local BASE = "https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/Library.lua"
+local BASE = "https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/"
 
-local Library      = loadstring(game:HttpGet(BASE .. "Library.lua"))()
-local SaveManager  = loadstring(game:HttpGet(BASE .. "Addons/SaveManager.lua"))()
-local ThemeManager = loadstring(game:HttpGet(BASE .. "Addons/ThemeManager.lua"))()
+local function loadRemote(path)
+    local url = BASE .. path .. "?v=1.1.0"
+    local ok, source = pcall(function()
+        return game:HttpGet(url, true)
+    end)
+    if not ok then
+        error(("[NekomaruUI] Gagal download %s\nURL: %s\nError: %s")
+            :format(path, url, tostring(source)), 0)
+    end
+
+    local chunk, compileError = loadstring(source)
+    if not chunk then
+        error(("[NekomaruUI] Gagal compile %s: %s"):format(path, tostring(compileError)), 0)
+    end
+    return chunk()
+end
+
+local Library      = loadRemote("Library.lua")
+local SaveManager  = loadRemote("Addons/SaveManager.lua")
+local ThemeManager = loadRemote("Addons/ThemeManager.lua")
+
+Library:SetAnimation({ Enabled = true, Fast = 0.12, Normal = 0.20, Slow = 0.28 })
 
 SaveManager:SetLibrary(Library)
 ThemeManager:SetLibrary(Library)
