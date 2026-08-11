@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0] — 2026-08-11
+
+### Fixed
+- Semua raw URL sekarang menunjuk struktur repo yang benar:
+  `Nekoomaruu/roblox/main/NekomaruUi/`.
+- `AssetsBaseURL` tidak lagi menunjuk repository lama yang tidak ada.
+- Example loader menampilkan file, URL, dan error yang jelas saat download gagal.
+- Request example memakai bypass cache agar commit terbaru langsung terambil.
+
+### Added
+- Smooth open, minimize, restore, dan perpindahan tab.
+- `Library:SetAnimation()` untuk mengatur atau mematikan animasi.
+
 ## [1.0.0] — 2026-08-10
 
 Rilis pertama NekomaruUI.

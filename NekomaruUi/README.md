@@ -8,7 +8,7 @@ minimize jadi icon bulat mengambang, dan support icon PNG lokal lewat
 Konsepnya sama seperti Obsidian / Rayfield: **UI-nya di library, logic-nya di script kamu.**
 
 ```lua
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nekoomaruu/NekomaruUI/main/Library.lua"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/Library.lua", true))()
 
 local Window = Library:CreateWindow({
     Title = "Nekomaru Hub",
@@ -49,6 +49,7 @@ Library:Notify({ Title = "Nekomaru Hub", Content = "Loaded!", Type = "success" }
 - `SaveManager` — simpan/load config JSON, autoload
 - `ThemeManager` — 4 preset theme + custom accent
 - Support mouse & touch (mobile-friendly)
+- Smooth animation untuk window open/restore/minimize, tab, toggle, dropdown, dan interaksi
 - `Library:Unload()` bersih: semua koneksi di-disconnect
 
 ## Struktur Repository
@@ -76,14 +77,28 @@ NekomaruUI
 **Cara 1 — online (disarankan)**
 
 ```lua
-local BASE = "https://raw.githubusercontent.com/Nekoomaruu/NekomaruUI/main/"
-local Library      = loadstring(game:HttpGet(BASE .. "Library.lua"))()
-local SaveManager  = loadstring(game:HttpGet(BASE .. "Addons/SaveManager.lua"))()
-local ThemeManager = loadstring(game:HttpGet(BASE .. "Addons/ThemeManager.lua"))()
+local BASE = "https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/"
+local Library      = loadstring(game:HttpGet(BASE .. "Library.lua", true))()
+local SaveManager  = loadstring(game:HttpGet(BASE .. "Addons/SaveManager.lua", true))()
+local ThemeManager = loadstring(game:HttpGet(BASE .. "Addons/ThemeManager.lua", true))()
 ```
 
 Icon otomatis terdownload ke `NekomaruUI/Assets/` di workspace executor pada
 pemakaian pertama.
+
+> Path GitHub bersifat **case-sensitive**. Folder repo ini bernama persis
+> `NekomaruUi`, bukan `NekomaruUI`. Parameter `true` memaksa bypass cache executor.
+
+### Atur animasi
+
+```lua
+Library:SetAnimation({
+    Enabled = true,
+    Fast = 0.12,
+    Normal = 0.20,
+    Slow = 0.28,
+})
+```
 
 **Cara 2 — offline**
 

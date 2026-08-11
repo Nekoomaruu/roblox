@@ -1,12 +1,12 @@
 --[[
     NekomaruUI — Roblox Script UI Library
-    Version : 1.0.0
+    Version : 1.1.0
     Author  : Nekomaru Hub
     Target  : Delta Executor (juga jalan di Solara / Wave / Xeno / Codex, dsb)
 
     Pemakaian singkat:
         local Library = loadstring(game:HttpGet("<raw-url>/Library.lua"))()
-        local Window  = Library:CreateWindow({ Title = "Nekomaru Hub", SubTitle = "Version 1.0.0" })
+        local Window  = Library:CreateWindow({ Title = "Nekomaru Hub", SubTitle = "Version 1.1.0" })
         local Tab     = Window:AddTab("Player", "Home")
         local Sec     = Tab:AddSection("Utility Player")
         Sec:AddToggle("Noclip", { Text = "Noclip", Desc = "Tembus tembok", Callback = function(v) end })
@@ -50,11 +50,19 @@ local protectgui        = env("protect_gui") or env("protectgui")
 local Library = {}
 Library.__index = Library
 
-Library.Version      = "1.0.0"
+Library.Version      = "1.1.0"
 Library.Folder       = "NekomaruUI"          -- folder di workspace executor
 Library.AssetsFolder = "NekomaruUI/Assets"   -- tempat file .png icon
 -- Base URL buat auto-download icon kalau file lokal belum ada.
-Library.AssetsBaseURL = "https://raw.githubusercontent.com/Nekoomaruu/NekomaruUI/main/Assets/"
+Library.AssetsBaseURL = "https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/Assets/"
+
+-- Kecepatan animasi bisa diubah sebelum CreateWindow dipanggil.
+Library.Animation = {
+    Enabled = true,
+    Fast = 0.12,
+    Normal = 0.20,
+    Slow = 0.28,
+}
 
 Library.Toggles  = {}   -- [idx] = toggle object   (dipakai SaveManager)
 Library.Options  = {}   -- [idx] = element object  (dipakai SaveManager)
@@ -121,6 +129,10 @@ local function padding(parent, all, l, r, t, b)
 end
 
 local function tween(inst, time, props, style)
+    if not Library.Animation.Enabled then
+        for property, value in pairs(props) do inst[property] = value end
+        return nil
+    end
     local t = TweenService:Create(inst, TweenInfo.new(time or 0.18, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
     t:Play()
     return t
@@ -234,6 +246,14 @@ end
 --- Pre-download semua icon (opsional, biar smooth waktu buka UI).
 function Library:PreloadIcons(list)
     for _, n in ipairs(list or {}) do self:GetIcon(n) end
+end
+
+--- Aktif/nonaktifkan animasi, atau ganti kecepatannya.
+--- Library:SetAnimation({ Enabled = true, Normal = 0.22 })
+function Library:SetAnimation(options)
+    for key, value in pairs(options or {}) do
+        if self.Animation[key] ~= nil then self.Animation[key] = value end
+    end
 end
 
 --============================================================
@@ -1126,6 +1146,13 @@ function Library:CreateWindow(opt)
     corner(main, 14)
     stroke(main, Library.Theme.Stroke, 1.5)
     self.Main = main
+    self.OpenSize = size
+
+    local mainScale = new("UIScale", {
+        Scale = opt.AutoShow == false and 1 or 0.94,
+        Parent = main,
+    })
+    self.MainScale = mainScale
 
     -- ---- Topbar ----
     local top = new("Frame", {
@@ -1245,7 +1272,14 @@ function Library:CreateWindow(opt)
     end)
 
     Library.Windows[#Library.Windows + 1] = self
-    if opt.AutoShow == false then main.Visible = false; self.Visible = false end
+    if opt.AutoShow == false then
+        main.Visible = false
+        self.Visible = false
+    else
+        main.BackgroundTransparency = 1
+        tween(mainScale, Library.Animation.Slow, { Scale = 1 }, Enum.EasingStyle.Quint)
+        tween(main, Library.Animation.Normal, { BackgroundTransparency = 0 })
+    end
     return self
 end
 
@@ -1320,7 +1354,17 @@ function Window:SelectTab(name)
     if not tab then return end
     for n, t in pairs(self.Tabs) do
         local on = (n == name)
-        t.Page.Visible = on
+        if on and not t.Page.Visible then
+            t.Page.Visible = true
+            t.Page.Position = UDim2.new(0, 22, 0, 42)
+            t.Page.ScrollBarImageTransparency = 1
+            tween(t.Page, Library.Animation.Normal, {
+                Position = UDim2.new(0, 14, 0, 42),
+                ScrollBarImageTransparency = 0,
+            }, Enum.EasingStyle.Quint)
+        elseif not on then
+            t.Page.Visible = false
+        end
         tween(t.Button, 0.14, { BackgroundTransparency = on and 0 or 1 })
         tween(t.Label, 0.14, { TextColor3 = on and Library.Theme.Accent or Library.Theme.SubText })
         if t.Image then tween(t.Image, 0.14, { ImageColor3 = on and Library.Theme.Accent or Library.Theme.SubText }) end
@@ -1331,19 +1375,38 @@ function Window:SelectTab(name)
 end
 
 function Window:Minimize()
+    if self.Minimized then return end
     self.Minimized = true
-    self.Main.Visible = false
-    self.IconButton.Visible = true
-    self.IconButton.Size = UDim2.new(0, 10, 0, 10)
-    tween(self.IconButton, 0.2, { Size = UDim2.new(0, 48, 0, 48) }, Enum.EasingStyle.Back)
+    tween(self.MainScale, Library.Animation.Normal, { Scale = 0.92 }, Enum.EasingStyle.Quint)
+    tween(self.Main, Library.Animation.Fast, { BackgroundTransparency = 1 })
+    task.delay(Library.Animation.Normal, function()
+        if not self.Minimized or not self.Main.Parent then return end
+        self.Main.Visible = false
+        self.IconButton.Visible = true
+        self.IconButton.Size = UDim2.new(0, 12, 0, 12)
+        self.IconButton.ImageTransparency = 1
+        tween(self.IconButton, Library.Animation.Slow, {
+            Size = UDim2.new(0, 48, 0, 48),
+            ImageTransparency = 0,
+        }, Enum.EasingStyle.Back)
+    end)
 end
 
 function Window:Maximize()
     self.Minimized = false
-    self.IconButton.Visible = false
+    tween(self.IconButton, Library.Animation.Fast, {
+        Size = UDim2.new(0, 12, 0, 12),
+        ImageTransparency = 1,
+    })
+    task.delay(Library.Animation.Fast, function()
+        if self.IconButton.Parent then self.IconButton.Visible = false end
+    end)
     self.Main.Visible = true
     self.Visible = true
-    self.Main.Size = UDim2.new(self.Main.Size.X.Scale, self.Main.Size.X.Offset, self.Main.Size.Y.Scale, self.Main.Size.Y.Offset)
+    self.Main.BackgroundTransparency = 1
+    self.MainScale.Scale = 0.94
+    tween(self.MainScale, Library.Animation.Slow, { Scale = 1 }, Enum.EasingStyle.Quint)
+    tween(self.Main, Library.Animation.Normal, { BackgroundTransparency = 0 })
 end
 Window.Restore = Window.Maximize
 
