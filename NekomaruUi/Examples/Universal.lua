@@ -3,7 +3,7 @@
     Semua UI di sini, logic tinggal dipanggil dari callback.
 ]]
 
-local BASE = "https://raw.githubusercontent.com/Nekoomaruu/NekomaruUI/main/"
+local BASE = "https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/Library.lua"
 
 local Library      = loadstring(game:HttpGet(BASE .. "Library.lua"))()
 local SaveManager  = loadstring(game:HttpGet(BASE .. "Addons/SaveManager.lua"))()
