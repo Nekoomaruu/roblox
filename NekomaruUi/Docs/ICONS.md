@@ -63,7 +63,7 @@ Delta/Workspace/NekomaruUI/Assets/
 ```lua
 Library.Folder        = "NekomaruHub"
 Library.AssetsFolder  = "NekomaruHub/Assets"
-Library.AssetsBaseURL = "https://raw.githubusercontent.com/<user>/<repo>/main/Assets/"
+Library.AssetsBaseURL = "https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/Assets/"
 ```
 
 ## Daftar icon bawaan
@@ -97,3 +97,4 @@ background transparan, warna putih (UI mewarnai icon otomatis lewat `ImageColor3
 | `attempt to call a nil value (getcustomasset)` | executor tidak support | otomatis fallback `rbxassetid` |
 | Icon lama nyangkut | cache executor | hapus file di `Assets/`, jalankan ulang |
 | Icon gepeng | PNG tidak kotak | pakai gambar rasio 1:1 |
+| `HTTP 404` | URL masih menunjuk repo lama atau kapitalisasi folder salah | gunakan path `Nekoomaruu/roblox/main/NekomaruUi/` persis |

@@ -10,7 +10,7 @@ cuma butuh sedikit perubahan.
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 
 -- NekomaruUI
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nekoomaruu/NekomaruUI/main/Library.lua"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/Library.lua", true))()
 ```
 
 ## 2. Window
