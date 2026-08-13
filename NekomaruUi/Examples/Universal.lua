@@ -1,97 +1,106 @@
 --[[
-    Contoh integrasi NekomaruUI ke Universal Script (Nekomaru Hub).
-    Semua UI di sini, logic tinggal dipanggil dari callback.
+    NekomaruUI v2.0.0 — Contoh pemakaian (Examples/Universal.lua)
+    Jalankan di executor (Delta dsb).
 ]]
 
 local BASE = "https://raw.githubusercontent.com/Nekoomaruu/roblox/main/NekomaruUi/"
 
 local function loadRemote(path)
-    local url = BASE .. path .. "?v=1.1.0"
-    local ok, source = pcall(function()
-        return game:HttpGet(url, true)
-    end)
-    if not ok then
-        error(("[NekomaruUI] Gagal download %s\nURL: %s\nError: %s")
-            :format(path, url, tostring(source)), 0)
-    end
-
-    local chunk, compileError = loadstring(source)
-    if not chunk then
-        error(("[NekomaruUI] Gagal compile %s: %s"):format(path, tostring(compileError)), 0)
-    end
-    return chunk()
+	local url = BASE .. path .. "?v=" .. tostring(tick())
+	local ok, body = pcall(game.HttpGet, game, url, true)
+	if not ok or type(body) ~= "string" or #body < 100 then
+		error(("NekomaruUI: gagal download %s (%s)"):format(url, tostring(body)), 0)
+	end
+	local chunk, err = loadstring(body, "=" .. path)
+	if not chunk then
+		error("NekomaruUI: syntax error di " .. path .. " -> " .. tostring(err), 0)
+	end
+	return chunk()
 end
 
-local Library      = loadRemote("Library.lua")
-local SaveManager  = loadRemote("Addons/SaveManager.lua")
-local ThemeManager = loadRemote("Addons/ThemeManager.lua")
-
-Library:SetAnimation({ Enabled = true, Fast = 0.12, Normal = 0.20, Slow = 0.28 })
-
-SaveManager:SetLibrary(Library)
-ThemeManager:SetLibrary(Library)
-SaveManager:SetFolder("NekomaruHub/Universal")
-ThemeManager:SetFolder("NekomaruHub/Universal")
-ThemeManager:LoadDefault()
+local Library = loadRemote("Library.lua")
 
 local Window = Library:CreateWindow({
-    Title = "Nekomaru Hub",
-    SubTitle = "Universal | v1.0.6",
-    Icon = "icon",
-    Size = UDim2.new(0, 620, 0, 420),
-    ToggleKeybind = Enum.KeyCode.RightShift,
+	Title    = "Nekomaru Hub",
+	Subtitle = "Universal Script",
+	Size     = UDim2.fromOffset(720, 460),
+	ToggleKey = Enum.KeyCode.RightShift,
 })
 
-local Tabs = {
-    Teleport  = Window:AddTab("Teleport", "teleport"),
-    Player    = Window:AddTab("Player", "Home"),
-    Visuals   = Window:AddTab("Visuals", "Open"),
-    Vehicle   = Window:AddTab("Vehicle", "Play"),
-    Server    = Window:AddTab("Server", "Timer"),
-    AutoAim   = Window:AddTab("Auto Aim", "WarningRed"),
-    SelfAlert = Window:AddTab("Self Alert", "Warning"),
-    Info      = Window:AddTab("Info", "Info"),
-    Settings  = Window:AddTab("Settings", "Settings"),
-}
+-- ============================ INFO ============================
+local Info = Window:AddTab({ Name = "Info", Icon = "info" })
+do
+	local s = Info:AddSection({ Name = "Welcome" })
+	s:AddParagraph({ Name = "Nekomaru Hub", Content = "UI custom pengganti Obsidian. Klik icon.png untuk buka/tutup panel." })
+	s:AddLabel({ Text = "Player: " .. game.Players.LocalPlayer.Name })
+	s:AddButton({ Name = "Copy Discord", Callback = function()
+		if setclipboard then setclipboard("discord.gg/nekomaru") end
+		Library:Notify({ Title = "Copied", Content = "Link disalin ke clipboard." })
+	end })
+end
 
--- ============ TELEPORT ============
-local tp = Tabs.Teleport:AddSection("Checkpoint")
-tp:AddButton({ Text = "Save Checkpoint", Variant = "accent", Callback = function()
-    Library:Notify({ Title = "Teleport", Content = "Checkpoint disimpan", Type = "success" })
-end })
-local cpList = tp:AddDropdown("CheckpointList", { Text = "Checkpoint", Values = { "Cp 1", "Cp 2", "Cp 3" } })
-tp:AddButton({ Text = "Teleport ke Checkpoint", Callback = function()
-    print("teleport ->", cpList.Value)
-end })
+-- ============================ FISHING ============================
+local Fishing = Window:AddTab({ Name = "Fishing", Icon = "fishing" })
+do
+	local s = Fishing:AddSection({ Name = "Main" })
+	s:AddToggle({ Name = "Auto Equip Rod", Flag = "AutoEquipRod", Default = false, Callback = function(v)
+		getgenv().AutoEquipRod = v
+	end })
+	s:AddToggle({ Name = "No Fishing Animations", Flag = "NoFishAnim", Callback = function(v)
+		getgenv().NoFishAnim = v
+	end })
+	s:AddToggle({ Name = "Walk on Water", Flag = "WalkWater", Callback = function(v)
+		getgenv().WalkOnWater = v
+	end })
+	s:AddSlider({ Name = "Cast Delay", Flag = "CastDelay", Min = 0, Max = 5, Rounding = 1, Suffix = "s", Default = 1 })
+	s:AddDropdown({ Name = "Rod", Flag = "RodType", Values = { "Basic", "Carbon", "Lucky", "Midas" }, Default = "Basic" })
+end
 
-local play = Tabs.Teleport:AddSection("Playback")
-play:AddSlider("PlayDelay", { Text = "Delay", Min = 0.5, Max = 3, Default = 1, Rounding = 1, Suffix = "s" })
-play:AddToggle("PlayLoop", { Text = "Loop", Desc = "Ulang playback dari awal" })
-play:AddButton({ Text = "Play", Variant = "accent", Callback = function() end })
-play:AddButton({ Text = "Stop", Variant = "danger", Callback = function() end })
+-- ============================ AUTOMATICALLY ============================
+local Auto = Window:AddTab({ Name = "Automatically", Icon = "auto" })
+do
+	local s = Auto:AddSection({ Name = "Farming" })
+	s:AddToggle({ Name = "Auto Farm", Flag = "AutoFarm" })
+	s:AddToggle({ Name = "Auto Sell", Flag = "AutoSell" })
+	s:AddDropdown({ Name = "Targets", Flag = "Targets", Multi = true, Values = { "Fish", "Chest", "Ore" } })
+	s:AddProgressBar({ Name = "Session Progress", Default = 0.25 })
+end
 
--- ============ PLAYER ============
-local ply = Tabs.Player:AddSection("Utility Player")
-ply:AddToggle("Noclip", { Text = "Noclip", Desc = "Tembus tembok", Callback = function(v) print("noclip", v) end })
-ply:AddToggle("InfJump", { Text = "Infinite Jump", Desc = "Lompat tanpa batas" })
-ply:AddSlider("WalkSpeed", { Text = "Walk Speed", Min = 16, Max = 200, Default = 16, Callback = function(v)
-    local c = game.Players.LocalPlayer.Character
-    if c and c:FindFirstChildOfClass("Humanoid") then c.Humanoid.WalkSpeed = v end
-end })
+-- ============================ TELEPORT ============================
+local Teleport = Window:AddTab({ Name = "Teleport", Icon = "teleport" })
+do
+	local s = Teleport:AddSection({ Name = "Places" })
+	s:AddInput({ Name = "Place ID", Flag = "PlaceId", Placeholder = "1234567" })
+	s:AddButton({ Name = "Teleport", Callback = function()
+		Library:Notify({ Title = "Teleport", Content = "Menuju " .. tostring(Library.Flags.PlaceId) })
+	end })
+end
 
--- ============ SETTINGS ============
-local s = Tabs.Settings:AddSection("Interface")
-s:AddKeybind("ToggleUI", { Text = "Toggle UI", Default = Enum.KeyCode.RightShift })
-s:AddToggle("Watermark", { Text = "Watermark", Default = true, Callback = function(v)
-    if v then Library:SetWatermark("Nekomaru Hub | Universal") end
-    Library:SetWatermarkVisibility(v)
-end })
-s:AddButton({ Text = "Unload Script", Variant = "danger", Callback = function() Library:Unload() end })
+-- ============================ MENU ============================
+local Menu = Window:AddTab({ Name = "Menu", Icon = "settings" })
+do
+	local s = Menu:AddSection({ Name = "Interface" })
+	s:AddDropdown({ Name = "Theme", Values = Library:GetThemeList(), Default = "Nekomaru", Callback = function(v)
+		Library:SetTheme(v)
+	end })
+	s:AddColorPicker({ Name = "Accent", Default = Library.Theme.Accent, Callback = function(c)
+		Library:SetAccent(c)
+	end })
+	s:AddKeybind({ Name = "Toggle UI", Default = Enum.KeyCode.RightShift, Callback = function()
+		Window:Toggle()
+	end })
+	s:AddButton({ Name = "Save Config", Callback = function()
+		local ok, info = Library:SaveConfigFile("default")
+		Library:Notify({ Title = ok and "Saved" or "Error", Content = tostring(info) })
+	end })
+	s:AddButton({ Name = "Load Config", Callback = function()
+		local ok, info = Library:LoadConfigFile("default")
+		Library:Notify({ Title = ok and "Loaded" or "Error", Content = tostring(info) })
+	end })
+	s:AddButton({ Name = "Unload", Callback = function()
+		Library:Unload()
+	end })
+end
 
-ThemeManager:BuildThemeSection(Tabs.Settings)
-SaveManager:IgnoreThemeSettings()
-SaveManager:BuildConfigSection(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
-
-Library:SetWatermark("Nekomaru Hub | Universal v1.0.6")
-Library:Notify({ Title = "Nekomaru Hub", Content = "Script berhasil diload!", Type = "success", Icon = "Info" })
+Window:SelectTab(1)
+Library:Notify({ Title = "Nekomaru Hub", Content = "Loaded v2.0.0", Duration = 4 })
