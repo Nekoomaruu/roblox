@@ -10,7 +10,7 @@ Chatbot AI multi-provider: **Google AI Studio, OpenRouter, Groq, NVIDIA NIM**.
 1. Buka Delta Executor, tempel loader di bawah, lalu Execute:
 
 ```lua
-loadstring(game:HttpGet("https://RAW-URL-KAMU/AIChatbot.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Nekoomaruu/roblox/refs/heads/main/chatbotlua/AIChatbot.lua"))()
 ```
 
 Atau salin isi `AIChatbot.lua` langsung ke editor executor.
