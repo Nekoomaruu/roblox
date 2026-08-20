@@ -7,6 +7,21 @@ versi mengikuti [Semantic Versioning](https://semver.org/).
 > langsung dari tab **Changelog** di dalam script. Kalau update salah satu,
 > update dua-duanya.
 
+## [3.5.0] - 2026-08-19
+### Added
+- Fly di tab Player dengan 3 method: CFrame Fly, Velocity Fly, Align Fly (speed, vertical toggle, keybind F, tombol up/down untuk mobile)
+- Groupbox Universal / Tools di tab Player: Freeze Character, Spin, Click Teleport, Sit/Stand, Copy Position
+- Button "Checkpoint Finder" yang meng-execute script NekoCpFinder_v2 dari GitHub (bukan diload sebagai bagian script ini)
+- Server: Server Hop (Random), Auto Server Hop timer, Auto hop kalau server hampir full, Copy JobId/PlaceId/Join Script, Join by JobId, Leave Game
+- Visuals: Disable Post FX, No Shadows, Camera FOV, Time of Day, Max Zoom Distance, Clear Sky, X-Ray, Remove Textures & Decals
+
+### Changed
+- Tab "Teleport" diganti nama menjadi "Main"
+
+### Removed
+- Watermark part "Nekomaru Hub | Teleport Saver"
+- Tab Vehicle beserta fitur Vehicle Fly
+
 ## [3.3.0] - 2026-08-08
 ### Added
 - Tab **Changelog** di dalam script: riwayat versi (Added / Changed / Removed / Fixed) bisa dibaca langsung di UI.
@@ -56,4 +71,3 @@ versi mengikuti [Semantic Versioning](https://semver.org/).
 - Delay slider 0.5 - 3 detik dan toggle Loop.
 - Self Alert (player biasa & admin) dengan method Kick atau Server Hop.
 - UI Obsidian: tab Teleport, Self Alert, Settings.
-

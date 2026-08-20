@@ -11,8 +11,8 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ORDER = [
     "Services", "Utils", "UI", "DefaultCheckpoints", "Config",
-    "Teleport", "Player", "Visual", "ESP", "Vehicle", "Server",
-    "Aimbot", "Hitbox", "Alert", "Info", "Settings",
+    "Teleport", "Player", "Visual", "ESP", "Server",
+    "Aimbot", "Hitbox", "Alert", "Info", "Changelog", "Settings",
 ]
 
 out = ["-- Teleport Saver by Nekomaru Hub — bundled build (jangan edit manual)",

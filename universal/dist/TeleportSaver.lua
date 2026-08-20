@@ -159,10 +159,9 @@ function UI.Init(ctx)
     })
 
     local Tabs = {
-        Teleport  = Window:AddTab("Teleport", "map-pin"),
+        Main      = Window:AddTab("Main", "map-pin"),
         Player    = Window:AddTab("Player", "user"),
         Visuals   = Window:AddTab("Visuals", "eye"),
-        Vehicle   = Window:AddTab("Vehicle", "car"),
         Server    = Window:AddTab("Server", "server"),
         AutoAim   = Window:AddTab("Auto Aim", "crosshair"),
         SelfAlert = Window:AddTab("Self Alert", "shield-alert"),
@@ -170,6 +169,9 @@ function UI.Init(ctx)
         Changelog = Window:AddTab("Changelog", "scroll-text"),
         Settings  = Window:AddTab("Settings", "settings"),
     }
+
+    -- alias: module Teleport masih pakai Tabs.Teleport
+    Tabs.Teleport = Tabs.Main
 
     return { Window = Window, Tabs = Tabs }
 end
@@ -366,6 +368,180 @@ function Teleport.Init(ctx)
         return true
     end
 
+    -- ============================================================
+    -- CHECKPOINT SCAN (anti "checkpoint bergeser")
+    -- Ide: sebagian game memindahkan/menggeser posisi checkpoint sedikit,
+    -- jadi TP tepat ke koordinat lama bisa nggak kena hitbox checkpoint.
+    -- Solusi: setelah TP ke koordinat tersimpan, player "diputar"/disebar
+    -- ke sekitar titik itu dari radius 1 stud sampai 10 stud (bisa diatur),
+    -- supaya hitbox checkpoint tetap ke-trigger walau geser.
+    -- ============================================================
+    local ScanEnabled   = false
+    local ScanOnManual  = true
+    local ScanMethod    = "Orbit Spiral"
+    local ScanDelay     = 0.05   -- detik per titik scan
+    local ScanMinR      = 1
+    local ScanMaxR      = 10
+    local ScanStepR     = 1
+    local ScanPoints    = 8      -- titik per ring (resolusi putaran)
+    local ScanYEnabled  = false
+    local ScanYRange    = 4      -- +/- stud vertikal
+    local ScanYSteps    = 2      -- layer atas & bawah
+    local ScanTimeout   = 6      -- detik maksimal per checkpoint (0 = tanpa batas)
+    local ScanReturn    = true   -- balik ke titik tengah setelah scan
+    local ScanStopOnHit = true   -- berhenti kalau progress (leaderstats) berubah
+    local ScanAnchor    = false  -- kunci velocity biar nggak jatuh saat scan
+    local ScanCancel    = false  -- flag internal buat motong scan yang jalan
+    local ScanBusy      = false  -- true kalau scan manual sedang jalan
+
+    local ScanMethods = {
+        "Orbit Spiral",     -- ring 1..10 stud, tiap ring diputar penuh
+        "Cross Axis",       -- 4 arah (+X,-X,+Z,-Z) per radius, paling cepat
+        "Vertical Sweep",   -- naik-turun dulu di titik tengah, lalu ring
+        "Grid Cube",        -- pola grid kotak di sekitar checkpoint
+        "Random Jitter",    -- titik acak dalam bola radius max
+        "Dwell Hover",      -- diam di titik + micro-move (buat checkpoint statis)
+    }
+
+    -- Snapshot progress dari leaderstats (Stage/Checkpoint/Level/dll)
+    local function progressSnapshot()
+        local plr = ctx.Services.Players.LocalPlayer
+        local ls = plr and plr:FindFirstChild("leaderstats")
+        if not ls then return nil end
+        local parts = {}
+        for _, v in ipairs(ls:GetChildren()) do
+            table.insert(parts, tostring(v.Name) .. "=" .. tostring(v.Value))
+        end
+        table.sort(parts)
+        return table.concat(parts, "|")
+    end
+
+    -- Pindah player ke posisi absolut + tunggu ScanDelay (respect pause/stop)
+    local function scanMove(v3)
+        local root = Utils.getRoot()
+        if not root then return false end
+        root.CFrame = CFrame.new(v3)
+        if ScanAnchor then
+            pcall(function()
+                root.AssemblyLinearVelocity = Vector3.new()
+                root.AssemblyAngularVelocity = Vector3.new()
+            end)
+        end
+        local waited = 0
+        local d = math.max(0.01, ScanDelay)
+        while waited < d do
+            if ScanCancel then return false end
+
+            while Paused and Playing do task.wait(0.05) end
+            task.wait(0.02)
+            waited = waited + 0.02
+        end
+        return true
+    end
+
+    -- Bangun daftar offset (Vector3) sesuai method terpilih
+    local function buildOffsets()
+        local list = {}
+        local minR = math.min(ScanMinR, ScanMaxR)
+        local maxR = math.max(ScanMinR, ScanMaxR)
+        local stepR = math.max(0.5, ScanStepR)
+        local pts = math.max(3, math.floor(ScanPoints))
+
+        if ScanMethod == "Cross Axis" then
+            local r = minR
+            while r <= maxR do
+                table.insert(list, Vector3.new(r, 0, 0))
+                table.insert(list, Vector3.new(-r, 0, 0))
+                table.insert(list, Vector3.new(0, 0, r))
+                table.insert(list, Vector3.new(0, 0, -r))
+                r = r + stepR
+            end
+        elseif ScanMethod == "Grid Cube" then
+            local r = minR
+            while r <= maxR do
+                for gx = -1, 1 do
+                    for gz = -1, 1 do
+                        if not (gx == 0 and gz == 0) then
+                            table.insert(list, Vector3.new(gx * r, 0, gz * r))
+                        end
+                    end
+                end
+                r = r + stepR
+            end
+        elseif ScanMethod == "Random Jitter" then
+            local total = pts * math.max(1, math.floor((maxR - minR) / stepR) + 1)
+            for _ = 1, total do
+                local ang = math.random() * math.pi * 2
+                local rad = minR + math.random() * (maxR - minR)
+                local y = ScanYEnabled and (math.random() * 2 - 1) * ScanYRange or 0
+                table.insert(list, Vector3.new(math.cos(ang) * rad, y, math.sin(ang) * rad))
+            end
+        elseif ScanMethod == "Dwell Hover" then
+            for i = 1, pts do
+                local ang = (i / pts) * math.pi * 2
+                table.insert(list, Vector3.new(math.cos(ang) * minR, 0, math.sin(ang) * minR))
+                table.insert(list, Vector3.new())
+            end
+        elseif ScanMethod == "Vertical Sweep" then
+            local layers = math.max(1, math.floor(ScanYSteps))
+            for i = -layers, layers do
+                table.insert(list, Vector3.new(0, (i / layers) * ScanYRange, 0))
+            end
+            local r = minR
+            while r <= maxR do
+                for i = 1, pts do
+                    local ang = (i / pts) * math.pi * 2
+                    table.insert(list, Vector3.new(math.cos(ang) * r, 0, math.sin(ang) * r))
+                end
+                r = r + stepR
+            end
+        else -- Orbit Spiral (default)
+            local r = minR
+            while r <= maxR do
+                for i = 1, pts do
+                    local ang = (i / pts) * math.pi * 2
+                    local ox, oz = math.cos(ang) * r, math.sin(ang) * r
+                    table.insert(list, Vector3.new(ox, 0, oz))
+                    if ScanYEnabled then
+                        local layers = math.max(1, math.floor(ScanYSteps))
+                        for l = 1, layers do
+                            local oy = (l / layers) * ScanYRange
+                            table.insert(list, Vector3.new(ox, oy, oz))
+                            table.insert(list, Vector3.new(ox, -oy, oz))
+                        end
+                    end
+                end
+                r = r + stepR
+            end
+        end
+        return list
+    end
+
+    -- Scan penuh di sekitar 1 checkpoint. return true kalau selesai normal.
+    local function scanAtCheckpoint(cp)
+        local center = Vector3.new(cp.x, cp.y, cp.z)
+        local before = ScanStopOnHit and progressSnapshot() or nil
+        local offsets = buildOffsets()
+        local t0 = tick()
+        for _, off in ipairs(offsets) do
+            if ScanTimeout > 0 and (tick() - t0) >= ScanTimeout then break end
+            if not scanMove(center + off) then return false end
+            if before then
+                local now = progressSnapshot()
+                if now and now ~= before then
+                    notify("Checkpoint terdeteksi, scan dipotong", 2)
+                    break
+                end
+            end
+        end
+        if ScanReturn then
+            local root = Utils.getRoot()
+            if root then root.CFrame = CFrame.new(center) end
+        end
+        return true
+    end
+
+
     local function nextDefaultName()
         return string.format("Cp %d", #Checkpoints + 1)
     end
@@ -452,7 +628,16 @@ function Teleport.Init(ctx)
         Func = function()
             local idx = getSelectedIndex()
             if not idx or not Checkpoints[idx] then notify("Pilih cp dulu", 2); return end
-            teleportTo(Checkpoints[idx])
+            local cp = Checkpoints[idx]
+            teleportTo(cp)
+            if ScanOnManual and not ScanBusy then
+                ScanCancel = false
+                ScanBusy = true
+                task.spawn(function()
+                    scanAtCheckpoint(cp)
+                    ScanBusy = false
+                end)
+            end
         end,
     }):AddButton({
         Text = "Delete",
@@ -526,6 +711,7 @@ function Teleport.Init(ctx)
     local function stopPlayback(msg)
         Playing = false
         Paused = false
+        ScanCancel = true
         if msg then notify(msg, 2) end
     end
 
@@ -535,6 +721,7 @@ function Teleport.Init(ctx)
         if #Checkpoints == 0 then notify("Belum ada checkpoint", 3); return end
         Playing = true
         Paused = false
+        ScanCancel = false
         PlayThread = task.spawn(function()
             local completed = 0
             while Playing do
@@ -543,6 +730,9 @@ function Teleport.Init(ctx)
                     while Paused and Playing do task.wait(0.1) end
                     if not Playing then return end
                     teleportTo(cp)
+                    if ScanEnabled then scanAtCheckpoint(cp) end
+                    if not Playing then return end
+
                     local t = 0
                     while t < PlayDelay do
                         if not Playing then return end
@@ -585,10 +775,136 @@ function Teleport.Init(ctx)
     RightBox:AddButton({
         Text = "Stop",
         Func = function()
-            if not Playing then notify("Belum play", 2); return end
+            if not Playing and not ScanBusy then notify("Belum play", 2); return end
+            ScanCancel = true
             stopPlayback("Stopped")
         end,
     })
+
+    -- ---------- Checkpoint Scan ----------
+    local ScanBox = Tabs.Teleport:AddRightGroupbox("Checkpoint Scan (Anti Geser)")
+
+    ScanBox:AddToggle("scan_enabled", {
+        Text = "Enable Scan saat Play",
+        Tooltip = "Setelah TP ke checkpoint, player diputar 1-10 stud di sekitarnya biar hitbox checkpoint tetap kena walau posisinya digeser game.",
+        Default = false,
+        Callback = function(v) ScanEnabled = v end,
+    })
+
+    ScanBox:AddToggle("scan_manual", {
+        Text = "Scan juga saat Teleport manual",
+        Default = true,
+        Callback = function(v) ScanOnManual = v end,
+    })
+
+    ScanBox:AddDropdown("scan_method", {
+        Values = ScanMethods,
+        Default = 1,
+        Multi = false,
+        Text = "Scan Method",
+        Callback = function(v) ScanMethod = v end,
+    })
+
+    ScanBox:AddSlider("scan_speed", {
+        Text = "Scan Speed (delay per titik)",
+        Default = 0.05,
+        Min = 0.01,
+        Max = 0.5,
+        Rounding = 2,
+        Suffix = "s",
+        Callback = function(v) ScanDelay = v end,
+    })
+
+    ScanBox:AddSlider("scan_min_r", {
+        Text = "Radius Awal",
+        Default = 1, Min = 0, Max = 20, Rounding = 1, Suffix = " stud",
+        Callback = function(v) ScanMinR = v end,
+    })
+
+    ScanBox:AddSlider("scan_max_r", {
+        Text = "Radius Akhir",
+        Default = 10, Min = 1, Max = 50, Rounding = 1, Suffix = " stud",
+        Callback = function(v) ScanMaxR = v end,
+    })
+
+    ScanBox:AddSlider("scan_step_r", {
+        Text = "Radius Step",
+        Default = 1, Min = 0.5, Max = 10, Rounding = 1, Suffix = " stud",
+        Callback = function(v) ScanStepR = v end,
+    })
+
+    ScanBox:AddSlider("scan_points", {
+        Text = "Titik per Ring (resolusi putaran)",
+        Default = 8, Min = 3, Max = 32, Rounding = 0,
+        Callback = function(v) ScanPoints = v end,
+    })
+
+    ScanBox:AddToggle("scan_vertical", {
+        Text = "Sertakan offset vertikal (naik/turun)",
+        Default = false,
+        Callback = function(v) ScanYEnabled = v end,
+    })
+
+    ScanBox:AddSlider("scan_y_range", {
+        Text = "Jangkauan Vertikal",
+        Default = 4, Min = 1, Max = 25, Rounding = 1, Suffix = " stud",
+        Callback = function(v) ScanYRange = v end,
+    })
+
+    ScanBox:AddSlider("scan_y_steps", {
+        Text = "Layer Vertikal",
+        Default = 2, Min = 1, Max = 8, Rounding = 0,
+        Callback = function(v) ScanYSteps = v end,
+    })
+
+    ScanBox:AddSlider("scan_timeout", {
+        Text = "Timeout per Checkpoint (0 = off)",
+        Default = 6, Min = 0, Max = 30, Rounding = 1, Suffix = "s",
+        Callback = function(v) ScanTimeout = v end,
+    })
+
+    ScanBox:AddToggle("scan_return", {
+        Text = "Balik ke titik tengah setelah scan",
+        Default = true,
+        Callback = function(v) ScanReturn = v end,
+    })
+
+    ScanBox:AddToggle("scan_stop_on_hit", {
+        Text = "Auto stop scan kalau progress berubah",
+        Tooltip = "Baca leaderstats (Stage/Checkpoint/dll). Kalau nilainya berubah berarti checkpoint kena, scan langsung dipotong biar cepat.",
+        Default = true,
+        Callback = function(v) ScanStopOnHit = v end,
+    })
+
+    ScanBox:AddToggle("scan_anchor", {
+        Text = "Anchor velocity saat scan (anti jatuh)",
+        Default = false,
+        Callback = function(v) ScanAnchor = v end,
+    })
+
+    ScanBox:AddButton({
+        Text = "Scan Checkpoint Terpilih",
+        Func = function()
+            if ScanBusy then notify("Scan sedang jalan", 2); return end
+            local idx = getSelectedIndex()
+            if not idx or not Checkpoints[idx] then notify("Pilih cp dulu", 2); return end
+            ScanCancel = false
+            ScanBusy = true
+            task.spawn(function()
+                teleportTo(Checkpoints[idx])
+                scanAtCheckpoint(Checkpoints[idx])
+                ScanBusy = false
+                notify("Scan selesai", 2)
+            end)
+        end,
+    }):AddButton({
+        Text = "Stop Scan",
+        Func = function()
+            ScanCancel = true
+            notify("Scan dihentikan", 2)
+        end,
+    })
+
 
     -- ---------- Config (save/load checkpoints) ----------
     local ConfigDropdown
@@ -885,6 +1201,329 @@ function Player.Init(ctx)
         Callback = function(v) NoClipEnabled = v end,
     })
 
+    -- ============================================================
+    -- Fly (3 method)
+    -- ============================================================
+    local FlyBox = Tabs.Player:AddLeftGroupbox("Fly", "plane")
+
+    local FlyEnabled  = false
+    local FlyMethod   = "CFrame Fly"
+    local FlySpeed    = 60
+    local FlyVertical = true
+
+    local flyConn, flyBV, flyBG, flyAlign, flyOrient
+    local flyKeys = { up = false, down = false }
+
+    local function flyCleanup()
+        if flyConn then flyConn:Disconnect(); flyConn = nil end
+        for _, obj in ipairs({ flyBV, flyBG, flyAlign, flyOrient }) do
+            if obj then pcall(function() obj:Destroy() end) end
+        end
+        flyBV, flyBG, flyAlign, flyOrient = nil, nil, nil, nil
+        local hum = Utils.getHumanoid()
+        if hum then
+            pcall(function()
+                hum.PlatformStand = false
+                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end)
+        end
+    end
+
+    -- arah input: keyboard WASD/space/ctrl, mobile pakai MoveDirection
+    local function flyDirection()
+        local cam = workspace.CurrentCamera
+        local root = Utils.getRoot()
+        if not cam or not root then return Vector3.zero end
+        local dir = Vector3.zero
+        local kb = UserInputService.KeyboardEnabled
+        if kb then
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir - Vector3.new(0, 1, 0) end
+        end
+        if dir.Magnitude == 0 then
+            -- mobile / thumbstick: pakai MoveDirection humanoid
+            local hum = Utils.getHumanoid()
+            if hum and hum.MoveDirection.Magnitude > 0 then
+                dir = hum.MoveDirection
+            end
+        end
+        if flyKeys.up then dir = dir + Vector3.new(0, 1, 0) end
+        if flyKeys.down then dir = dir - Vector3.new(0, 1, 0) end
+        if dir.Magnitude > 0 then dir = dir.Unit end
+        if not FlyVertical then dir = Vector3.new(dir.X, 0, dir.Z) end
+        return dir
+    end
+
+    -- Method 1: CFrame Fly — paling universal, jalan hampir di semua game
+    local function startCFrameFly()
+        local hum = Utils.getHumanoid()
+        if hum then hum.PlatformStand = true end
+        flyConn = RunService.RenderStepped:Connect(function(dt)
+            local root = Utils.getRoot()
+            if not root then return end
+            local dir = flyDirection()
+            pcall(function()
+                root.Velocity = Vector3.zero
+                root.CFrame = root.CFrame + dir * (FlySpeed * dt)
+            end)
+        end)
+    end
+
+    -- Method 2: Velocity Fly — pakai BodyVelocity + BodyGyro, halus & anti-jitter
+    local function startVelocityFly()
+        local root = Utils.getRoot()
+        if not root then return end
+        local hum = Utils.getHumanoid()
+        if hum then hum.PlatformStand = true end
+        flyBV = Instance.new("BodyVelocity")
+        flyBV.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+        flyBV.Velocity = Vector3.zero
+        flyBV.Parent = root
+        flyBG = Instance.new("BodyGyro")
+        flyBG.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+        flyBG.P = 9000
+        flyBG.D = 300
+        flyBG.CFrame = root.CFrame
+        flyBG.Parent = root
+        flyConn = RunService.Heartbeat:Connect(function()
+            local r = Utils.getRoot()
+            local cam = workspace.CurrentCamera
+            if not r or not flyBV then return end
+            flyBV.Velocity = flyDirection() * FlySpeed
+            if flyBG and cam then
+                flyBG.CFrame = CFrame.new(r.Position, r.Position + cam.CFrame.LookVector)
+            end
+        end)
+    end
+
+    -- Method 3: Align Fly — AlignPosition/AlignOrientation, paling aman dari anti-cheat velocity
+    local function startAlignFly()
+        local root = Utils.getRoot()
+        if not root then return end
+        local hum = Utils.getHumanoid()
+        if hum then hum.PlatformStand = true end
+        local att = Instance.new("Attachment")
+        att.Name = "NHFlyAtt"
+        att.Parent = root
+        flyAlign = Instance.new("AlignPosition")
+        flyAlign.Attachment0 = att
+        flyAlign.Mode = Enum.PositionAlignmentMode.OneAttachment
+        flyAlign.MaxForce = 1e9
+        flyAlign.MaxVelocity = math.huge
+        flyAlign.Responsiveness = 200
+        flyAlign.Position = root.Position
+        flyAlign.Parent = root
+        flyOrient = Instance.new("AlignOrientation")
+        flyOrient.Attachment0 = att
+        flyOrient.Mode = Enum.OrientationAlignmentMode.OneAttachment
+        flyOrient.MaxTorque = 1e9
+        flyOrient.Responsiveness = 200
+        flyOrient.Parent = root
+        local target = root.Position
+        flyConn = RunService.Heartbeat:Connect(function(dt)
+            local r = Utils.getRoot()
+            local cam = workspace.CurrentCamera
+            if not r or not flyAlign then return end
+            local dir = flyDirection()
+            if dir.Magnitude > 0 then
+                target = target + dir * (FlySpeed * dt)
+            end
+            -- kalau target kejauhan dari player (nabrak), tarik balik biar ga ketinggalan
+            if (target - r.Position).Magnitude > 30 then target = r.Position end
+            flyAlign.Position = target
+            if flyOrient and cam then
+                flyOrient.CFrame = CFrame.new(Vector3.zero, cam.CFrame.LookVector)
+            end
+        end)
+    end
+
+    local function setFly(on)
+        flyCleanup()
+        if not on then return end
+        local root = Utils.getRoot()
+        if not root then notify("Character belum ada", 2); return end
+        if FlyMethod == "Velocity Fly" then
+            startVelocityFly()
+        elseif FlyMethod == "Align Fly" then
+            startAlignFly()
+        else
+            startCFrameFly()
+        end
+    end
+
+    FlyBox:AddToggle("fly_toggle", {
+        Text = "Enable Fly",
+        Default = false,
+        Callback = function(v)
+            FlyEnabled = v
+            setFly(v)
+        end,
+    })
+
+    -- keybind F buat toggle fly (keyboard)
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == Enum.KeyCode.F then
+            local tg = Library and Library.Toggles and Library.Toggles["fly_toggle"]
+            if tg and tg.SetValue then tg:SetValue(not tg.Value) end
+        end
+    end)
+
+    FlyBox:AddDropdown("fly_method", {
+        Values = { "CFrame Fly", "Velocity Fly", "Align Fly" },
+        Default = 1,
+        Multi = false,
+        Text = "Fly Method",
+        Callback = function(v)
+            FlyMethod = v
+            if FlyEnabled then setFly(true) end
+        end,
+    })
+
+    FlyBox:AddSlider("fly_speed", {
+        Text = "Fly Speed",
+        Default = 60, Min = 10, Max = 400, Rounding = 0,
+        Callback = function(v) FlySpeed = v end,
+    })
+
+    FlyBox:AddToggle("fly_vertical", {
+        Text = "Allow Vertical (Space / Ctrl)",
+        Default = true,
+        Callback = function(v) FlyVertical = v end,
+    })
+
+    -- tombol naik/turun buat mobile (Delta)
+    FlyBox:AddButton({
+        Text = "Hold Up (mobile)",
+        Func = function()
+            flyKeys.up = true
+            task.delay(0.6, function() flyKeys.up = false end)
+        end,
+    }):AddButton({
+        Text = "Hold Down (mobile)",
+        Func = function()
+            flyKeys.down = true
+            task.delay(0.6, function() flyKeys.down = false end)
+        end,
+    })
+
+    -- re-apply fly setelah respawn
+    LocalPlayer.CharacterAdded:Connect(function()
+        if FlyEnabled then
+            task.wait(1)
+            setFly(true)
+        end
+    end)
+
+    -- ============================================================
+    -- Universal / Tools
+    -- ============================================================
+    local UtilBox = Tabs.Player:AddLeftGroupbox("Universal / Tools", "wrench")
+
+    -- Checkpoint Finder: execute script eksternal (bukan diload di dalam script ini)
+    local CP_FINDER_URL = "https://raw.githubusercontent.com/Nekoomaruu/roblox/refs/heads/main/NekoCpFinder_v2.lua"
+    UtilBox:AddButton({
+        Text = "Checkpoint Finder (execute script)",
+        Func = function()
+            notify("Menjalankan Checkpoint Finder...", 2)
+            task.spawn(function()
+                local ok, src = pcall(function() return game:HttpGet(CP_FINDER_URL) end)
+                if not ok or type(src) ~= "string" or #src < 50 then
+                    notify("Gagal download Checkpoint Finder", 3); return
+                end
+                local chunk, err = loadstring(src, "NekoCpFinder_v2")
+                if not chunk then notify("Syntax error CP Finder: " .. tostring(err), 4); return end
+                local ok2, res = pcall(chunk)
+                if not ok2 then notify("Error CP Finder: " .. tostring(res), 4) end
+            end)
+        end,
+    })
+
+    -- Freeze / Unfreeze
+    local frozenCF = nil
+    local FreezeConn
+    UtilBox:AddToggle("freeze_char", {
+        Text = "Freeze Character",
+        Default = false,
+        Callback = function(v)
+            if FreezeConn then FreezeConn:Disconnect(); FreezeConn = nil end
+            if v then
+                local root = Utils.getRoot()
+                if not root then notify("Character belum ada", 2); return end
+                frozenCF = root.CFrame
+                FreezeConn = RunService.Heartbeat:Connect(function()
+                    local r = Utils.getRoot()
+                    if r and frozenCF then
+                        r.CFrame = frozenCF
+                        r.Velocity = Vector3.zero
+                    end
+                end)
+            end
+        end,
+    })
+
+    -- Spin
+    local SpinConn
+    UtilBox:AddToggle("spin_char", {
+        Text = "Spin Character",
+        Default = false,
+        Callback = function(v)
+            if SpinConn then SpinConn:Disconnect(); SpinConn = nil end
+            if v then
+                SpinConn = RunService.Heartbeat:Connect(function(dt)
+                    local r = Utils.getRoot()
+                    if r then r.CFrame = r.CFrame * CFrame.Angles(0, math.rad(360 * dt), 0) end
+                end)
+            end
+        end,
+    })
+
+    -- Click Teleport (klik / tap ke tempat tujuan)
+    local ClickTP = false
+    UtilBox:AddToggle("click_tp", {
+        Text = "Click Teleport (klik ke lokasi)",
+        Default = false,
+        Callback = function(v) ClickTP = v end,
+    })
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if not ClickTP or gpe then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            local cam = workspace.CurrentCamera
+            local root = Utils.getRoot()
+            if not cam or not root then return end
+            local pos = input.Position
+            local ray = cam:ViewportPointToRay(pos.X, pos.Y)
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = { LocalPlayer.Character }
+            local hit = workspace:Raycast(ray.Origin, ray.Direction * 3000, params)
+            if hit then root.CFrame = CFrame.new(hit.Position + Vector3.new(0, 4, 0)) end
+        end
+    end)
+
+    UtilBox:AddButton({
+        Text = "Sit / Stand",
+        Func = function()
+            local hum = Utils.getHumanoid()
+            if hum then hum.Sit = not hum.Sit end
+        end,
+    }):AddButton({
+        Text = "Copy My Position",
+        Func = function()
+            local root = Utils.getRoot()
+            if not root then return end
+            local p = root.Position
+            local txt = string.format("%.2f, %.2f, %.2f", p.X, p.Y, p.Z)
+            if setclipboard then setclipboard(txt) end
+            notify("Posisi dicopy: " .. txt, 3)
+        end,
+    })
+
     -- ---------- Teleport to Player ----------
     local TPDropdown
     local function refreshTPList()
@@ -1037,6 +1676,109 @@ function Visual.Init(ctx)
                 end
             end)
             notify("FPS Boost diterapkan", 3)
+        end,
+    })
+
+    -- ---------- Post FX / Camera ----------
+    local CamBox = Tabs.Visuals:AddLeftGroupbox("Camera & Post FX", "camera")
+
+    CamBox:AddToggle("no_postfx", {
+        Text = "Disable Post FX (blur, bloom, dll)",
+        Default = false,
+        Callback = function(v)
+            pcall(function()
+                for _, fx in ipairs(Lighting:GetDescendants()) do
+                    if fx:IsA("BlurEffect") or fx:IsA("BloomEffect") or fx:IsA("SunRaysEffect")
+                        or fx:IsA("ColorCorrectionEffect") or fx:IsA("DepthOfFieldEffect") then
+                        fx.Enabled = not v
+                    end
+                end
+            end)
+        end,
+    })
+
+    CamBox:AddToggle("no_shadows", {
+        Text = "No Shadows",
+        Default = false,
+        Callback = function(v)
+            pcall(function() Lighting.GlobalShadows = not v end)
+        end,
+    })
+
+    CamBox:AddSlider("cam_fov", {
+        Text = "Camera FOV",
+        Default = 70, Min = 30, Max = 120, Rounding = 0,
+        Callback = function(v)
+            pcall(function() workspace.CurrentCamera.FieldOfView = v end)
+        end,
+    })
+
+    CamBox:AddSlider("clock_time", {
+        Text = "Time of Day",
+        Default = 14, Min = 0, Max = 24, Rounding = 1,
+        Callback = function(v)
+            pcall(function() Lighting.ClockTime = v end)
+        end,
+    })
+
+    CamBox:AddSlider("zoom_distance", {
+        Text = "Max Zoom Distance",
+        Default = 128, Min = 10, Max = 2000, Rounding = 0,
+        Callback = function(v)
+            pcall(function() ctx.Services.LocalPlayer.CameraMaxZoomDistance = v end)
+        end,
+    })
+
+    -- ---------- World ----------
+    local WorldBox = Tabs.Visuals:AddLeftGroupbox("World", "globe")
+
+    WorldBox:AddToggle("no_sky", {
+        Text = "Clear Sky (hapus skybox custom)",
+        Default = false,
+        Callback = function(v)
+            pcall(function()
+                for _, sky in ipairs(Lighting:GetChildren()) do
+                    if sky:IsA("Sky") then sky.Parent = v and nil or sky.Parent end
+                end
+            end)
+        end,
+    })
+
+    WorldBox:AddToggle("xray", {
+        Text = "X-Ray (dinding transparan)",
+        Default = false,
+        Callback = function(v)
+            pcall(function()
+                for _, part in ipairs(workspace:GetDescendants()) do
+                    if part:IsA("BasePart") and not part:IsDescendantOf(ctx.Services.Players) then
+                        local isChar = false
+                        for _, pl in ipairs(ctx.Services.Players:GetPlayers()) do
+                            if pl.Character and part:IsDescendantOf(pl.Character) then isChar = true; break end
+                        end
+                        if not isChar then
+                            if v then
+                                part:SetAttribute("NHOldTrans", part.Transparency)
+                                part.Transparency = 0.6
+                            else
+                                local old = part:GetAttribute("NHOldTrans")
+                                if old then part.Transparency = old end
+                            end
+                        end
+                    end
+                end
+            end)
+        end,
+    })
+
+    WorldBox:AddButton({
+        Text = "Remove Textures & Decals",
+        Func = function()
+            pcall(function()
+                for _, v in ipairs(workspace:GetDescendants()) do
+                    if v:IsA("Decal") or v:IsA("Texture") then v:Destroy() end
+                end
+            end)
+            notify("Texture & decal dihapus", 2)
         end,
     })
 
@@ -1225,109 +1967,6 @@ return ESPModule
 
 end
 
-_NH_MODULES['Vehicle'] = function()
---[[
-    Modules/Vehicle.lua
-    Vehicle Fly: attach BodyVelocity + BodyGyro ke part vehicle yang lu duduki.
-]]
-
-local Vehicle = {}
-
-function Vehicle.Init(ctx)
-    local Tabs = ctx.Tabs
-    local notify = ctx.Utils.notify
-    local LocalPlayer = ctx.Services.LocalPlayer
-    local RunService = ctx.Services.RunService
-    local UserInputService = ctx.Services.UserInputService
-
-    local V = {}
-
-    local VehBox = Tabs.Vehicle:AddLeftGroupbox("Vehicle Fly")
-
-    local VFlyEnabled = false
-    local VFlySpeed   = 100
-    local VFlyConn, VFlyBV, VFlyBG, VFlyTarget
-
-    local function findSeatVehicle()
-        local char = LocalPlayer.Character
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        local seat = hum and hum.SeatPart
-        if not seat then return nil end
-        -- naik ke atas ke assembly root (biasanya PrimaryPart / body)
-        local model = seat:FindFirstAncestorOfClass("Model")
-        if model and model.PrimaryPart then return model.PrimaryPart end
-        return seat.AssemblyRootPart or seat
-    end
-
-    local function stopVFly()
-        if VFlyConn then VFlyConn:Disconnect(); VFlyConn = nil end
-        if VFlyBV then VFlyBV:Destroy(); VFlyBV = nil end
-        if VFlyBG then VFlyBG:Destroy(); VFlyBG = nil end
-        VFlyTarget = nil
-    end
-
-    local function startVFly()
-        stopVFly()
-        local part = findSeatVehicle()
-        if not part then notify("Lu belum duduk di vehicle", 3); return end
-        VFlyTarget = part
-        VFlyBV = Instance.new("BodyVelocity")
-        VFlyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
-        VFlyBV.Velocity = Vector3.zero
-        VFlyBV.Parent = part
-        VFlyBG = Instance.new("BodyGyro")
-        VFlyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
-        VFlyBG.P = 5000
-        VFlyBG.D = 500
-        VFlyBG.CFrame = part.CFrame
-        VFlyBG.Parent = part
-
-        VFlyConn = RunService.RenderStepped:Connect(function()
-            if not VFlyEnabled or not VFlyTarget or not VFlyTarget.Parent then
-                stopVFly(); return
-            end
-            local cam = workspace.CurrentCamera
-            local dir = Vector3.zero
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0,1,0) end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir - Vector3.new(0,1,0) end
-            if dir.Magnitude > 0 then dir = dir.Unit end
-            VFlyBV.Velocity = dir * VFlySpeed
-            VFlyBG.CFrame = CFrame.new(VFlyTarget.Position, VFlyTarget.Position + cam.CFrame.LookVector)
-        end)
-    end
-
-    VehBox:AddToggle("vfly_toggle", {
-        Text = "Vehicle Fly (WASD + Space/Ctrl)",
-        Default = false,
-        Callback = function(v)
-            VFlyEnabled = v
-            if v then startVFly() else stopVFly() end
-        end,
-    })
-    VehBox:AddSlider("vfly_speed", {
-        Text = "Speed",
-        Default = 100, Min = 20, Max = 1000, Rounding = 0,
-        Callback = function(v) VFlySpeed = v end,
-    })
-    VehBox:AddButton({
-        Text = "Re-attach ke vehicle",
-        Func = function() if VFlyEnabled then startVFly() end end,
-    })
-
-    V.start = startVFly
-    V.stop = stopVFly
-
-    return V
-end
-
-return Vehicle
-
-end
-
 _NH_MODULES['Server'] = function()
 --[[
     Modules/Server.lua
@@ -1444,6 +2083,126 @@ function Server.Init(ctx)
         Text = "Server Hop (Low Player)",
         Func = function() serverHopFiltered(true) end,
     })
+
+    -- ---------- Server Hop tambahan ----------
+    HopBox:AddButton({
+        Text = "Server Hop (Random)",
+        Func = function()
+            local ok, res = pcall(function()
+                return HttpService:JSONDecode(game:HttpGet(
+                    "https://games.roblox.com/v1/games/" .. game.PlaceId
+                    .. "/servers/Public?sortOrder=Desc&limit=100"))
+            end)
+            if not ok or not res or not res.data or #res.data == 0 then
+                notify("Gagal ambil list server", 3); return
+            end
+            local pool = {}
+            for _, sv in ipairs(res.data) do
+                if sv.id ~= game.JobId and sv.playing < sv.maxPlayers then pool[#pool + 1] = sv end
+            end
+            if #pool == 0 then notify("Tidak ada server kosong", 3); return end
+            local pick = pool[math.random(1, #pool)]
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, pick.id, LocalPlayer)
+            end)
+        end,
+    })
+
+    local AutoHop = false
+    local AutoHopDelay = 120
+    HopBox:AddToggle("auto_hop", {
+        Text = "Auto Server Hop (timer)",
+        Default = false,
+        Callback = function(v) AutoHop = v end,
+    })
+    HopBox:AddSlider("auto_hop_delay", {
+        Text = "Auto Hop Delay",
+        Default = 120, Min = 30, Max = 900, Rounding = 0, Suffix = "s",
+        Callback = function(v) AutoHopDelay = v end,
+    })
+    task.spawn(function()
+        local t = 0
+        while task.wait(1) do
+            if AutoHop then
+                t = t + 1
+                if t >= AutoHopDelay then
+                    t = 0
+                    serverHopFiltered(true)
+                end
+            else
+                t = 0
+            end
+        end
+    end)
+
+    -- ---------- Utilities ----------
+    local UtilBox = Tabs.Server:AddLeftGroupbox("Server Utilities", "server-cog")
+
+    UtilBox:AddButton({
+        Text = "Copy JobId",
+        Func = function()
+            if setclipboard then setclipboard(tostring(game.JobId)) end
+            notify("JobId dicopy", 2)
+        end,
+    }):AddButton({
+        Text = "Copy Join Script",
+        Func = function()
+            local txt = string.format(
+                'game:GetService("TeleportService"):TeleportToPlaceInstance(%d, "%s", game:GetService("Players").LocalPlayer)',
+                game.PlaceId, tostring(game.JobId))
+            if setclipboard then setclipboard(txt) end
+            notify("Join script dicopy", 2)
+        end,
+    })
+
+    UtilBox:AddButton({
+        Text = "Copy PlaceId",
+        Func = function()
+            if setclipboard then setclipboard(tostring(game.PlaceId)) end
+            notify("PlaceId dicopy", 2)
+        end,
+    }):AddButton({
+        Text = "Leave Game",
+        Func = function() pcall(function() LocalPlayer:Kick("Left via Nekomaru Hub") end) end,
+    })
+
+    -- Join server by JobId (buat balik ke server temen)
+    local JobInput = UtilBox:AddInput("join_jobid", {
+        Text = "JobId",
+        Default = "",
+        Placeholder = "paste JobId di sini",
+        Numeric = false,
+        Finished = false,
+    })
+    UtilBox:AddButton({
+        Text = "Join by JobId",
+        Func = function()
+            local id = JobInput and JobInput.Value
+            if not id or id == "" then notify("JobId kosong", 2); return end
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, id, LocalPlayer)
+            end)
+        end,
+    })
+
+    -- Rejoin otomatis kalau player count di bawah/di atas batas tertentu
+    local AutoLeaveFull = false
+    UtilBox:AddToggle("auto_leave_full", {
+        Text = "Auto Hop kalau server hampir full",
+        Default = false,
+        Callback = function(v) AutoLeaveFull = v end,
+    })
+    task.spawn(function()
+        local Players = ctx.Services.Players
+        while task.wait(5) do
+            if AutoLeaveFull and Players.MaxPlayers > 0 then
+                if #Players:GetPlayers() >= (Players.MaxPlayers - 1) then
+                    notify("Server hampir full, hop...", 3)
+                    serverHopFiltered(true)
+                end
+            end
+        end
+    end)
 
     S.serverHopFiltered = serverHopFiltered
 
@@ -2223,9 +2982,23 @@ _NH_MODULES['Changelog'] = function()
 
 local Changelog = {}
 
-Changelog.Version = "3.3.0"
+Changelog.Version = "3.5.0"
 
 Changelog.VERSIONS = {
+    {
+        Version = "3.5.0",
+        Date = "2026-08-19",
+        Changes = {
+            { "Added", "Fly di tab Player dengan 3 method: CFrame Fly, Velocity Fly, Align Fly (+ speed, vertical, keybind F, tombol up/down mobile)" },
+            { "Added", "Groupbox Universal / Tools di tab Player: Freeze, Spin, Click Teleport, Sit/Stand, Copy Position" },
+            { "Added", "Button Checkpoint Finder (execute script NekoCpFinder_v2 langsung dari executor)" },
+            { "Added", "Server: Hop random, Auto Server Hop timer, Auto hop kalau server hampir full, Copy JobId/PlaceId/Join Script, Join by JobId, Leave Game" },
+            { "Added", "Visuals: Disable Post FX, No Shadows, Camera FOV, Time of Day, Max Zoom, Clear Sky, X-Ray, Remove Textures" },
+            { "Changed", "Tab Teleport diganti nama jadi Main" },
+            { "Removed", "Watermark part \"Nekomaru Hub | Teleport Saver\"" },
+            { "Removed", "Tab Vehicle + fitur Vehicle Fly" },
+        },
+    },
     {
         Version = "3.3.0",
         Date = "2026-08-08",
@@ -2380,8 +3153,8 @@ function Settings.Init(ctx)
     local ThemeManager = ctx.ThemeManager
     local SaveManager = ctx.SaveManager
 
-    safeMethod(Library, "SetWatermarkVisibility", true)
-    safeMethod(Library, "SetWatermark", "Nekomaru Hub | Teleport Saver")
+    -- Watermark part "Nekomaru Hub | Teleport Saver" dimatikan (permintaan user)
+    safeMethod(Library, "SetWatermarkVisibility", false)
 
     Library.KeyTab = Tabs.Settings
     local AboutBox = Tabs.Settings:AddLeftGroupbox("About", "info")
@@ -2497,7 +3270,6 @@ ctx.Teleport = nhRequire("Teleport").Init(ctx)
 ctx.Player   = nhRequire("Player").Init(ctx)
 ctx.Visual   = nhRequire("Visual").Init(ctx)
 ctx.ESP      = nhRequire("ESP").Init(ctx)
-ctx.Vehicle  = nhRequire("Vehicle").Init(ctx)
 ctx.Server   = nhRequire("Server").Init(ctx)
 ctx.Aimbot   = nhRequire("Aimbot").Init(ctx)
 ctx.Hitbox   = nhRequire("Hitbox").Init(ctx)
