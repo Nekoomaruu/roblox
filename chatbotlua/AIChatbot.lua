@@ -60,9 +60,8 @@ local Providers = {
     ["Google AI Studio"] = {
         KeyHint = "AIza... / AQ.Ab8... (aistudio.google.com/apikey)",
         Models = {
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
             "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
             "gemini-2.5-pro",
         },
         Build = function(messages)
@@ -147,7 +146,7 @@ local Providers = {
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant",
             "openai/gpt-oss-20b",
-            "gemma2-9b-it",
+            "openai/gpt-oss-120b",
         },
         Build = function(messages)
             return {
@@ -233,19 +232,32 @@ local function AskAI(userText)
 
     local req = provider.Build(BuildMessages(userText))
 
-    local ok, res = pcall(httpRequest, {
+    local requestOptions = {
         Url = req.Url,
         Method = "POST",
         Headers = req.Headers,
         Body = HttpService:JSONEncode(req.Body),
-    })
+    }
+
+    -- Nama opsi timeout berbeda-beda antar executor; Delta mengabaikannya
+    -- bila tidak didukung, jadi request tetap dapat berjalan.
+    requestOptions.Timeout = Config.Timeout
+
+    local ok, res = pcall(httpRequest, requestOptions)
 
     if not ok then return nil, "Request gagal: " .. tostring(res) end
-    if not res or not res.Body then return nil, "Tidak ada respons dari server." end
+    if not res then return nil, "Tidak ada respons dari server." end
+
+    -- Executor tidak seragam: ada yang memakai Body/StatusCode, ada body/Status.
+    local responseBody = res.Body or res.body
+    local statusCode = res.StatusCode or res.Status or res.status_code or 0
+    if not responseBody or responseBody == "" then
+        return nil, "Respons kosong dari server (status " .. tostring(statusCode) .. ")."
+    end
 
     local decoded
     local okDecode, err = pcall(function()
-        decoded = HttpService:JSONDecode(res.Body)
+        decoded = HttpService:JSONDecode(responseBody)
     end)
     if not okDecode then return nil, "Respons bukan JSON: " .. tostring(err) end
 
@@ -256,7 +268,7 @@ local function AskAI(userText)
 
     local text = provider.Parse(decoded)
     if not text or text == "" then
-        return nil, "Balasan kosong (status " .. tostring(res.StatusCode) .. ")"
+        return nil, "Balasan kosong (status " .. tostring(statusCode) .. ")"
     end
 
     return text
@@ -318,32 +330,32 @@ local BuildMainWindow -- forward declaration
 LoginBox:AddButton({
     Text = "Login / Connect",
     Func = function()
+        if Busy then return Library:Notify("Koneksi sedang dites...", 3) end
         if Config.ApiKey:gsub("%s", "") == "" then
             return Library:Notify("API key tidak boleh kosong!", 4)
         end
         Config.ApiKey = Config.ApiKey:gsub("^%s+", ""):gsub("%s+$", "")
         Config.Model = ModelsOf(Config.Provider)[1] or ""
 
-        Library:Notify(("Terhubung ke %s (%s)"):format(Config.Provider, Config.Model), 4)
+        Busy = true
+        Library:Notify(("Mengetes %s (%s)..."):format(Config.Provider, Config.Model), 4)
+        task.spawn(function()
+            local reply, err = AskAI("Balas hanya dengan kata: OK")
+            Busy = false
+            if not reply then
+                return Library:Notify("Login gagal: " .. tostring(err), 8)
+            end
+            if MainWindowBuilt then return end
 
-        if not MainWindowBuilt then
             MainWindowBuilt = true
-            LoginWindow:Dialog({
-                Title = "Berhasil",
-                Text = "Login sukses. Buka menu utama sekarang?",
-                Buttons = {
-                    {
-                        Title = "Buka",
-                        Func = function()
-                            Library:Unload()
-                            task.wait(0.2)
-                            BuildMainWindow()
-                        end,
-                    },
-                    { Title = "Nanti", Func = function() MainWindowBuilt = false end },
-                },
-            })
-        end
+            Library:Notify(("Terhubung ke %s (%s)"):format(Config.Provider, Config.Model), 4)
+
+            -- Obsidian versi terbaru tidak punya Window:Dialog(). Jangan Unload
+            -- library sebelum membuat menu utama karena Unload memutus semua event.
+            LoginWindow:Toggle(false)
+            task.wait(0.25)
+            BuildMainWindow()
+        end)
     end,
     DoubleClick = false,
 })
