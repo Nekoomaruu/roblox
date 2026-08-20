@@ -9,9 +9,23 @@
 
 local Changelog = {}
 
-Changelog.Version = "3.3.0"
+Changelog.Version = "3.5.0"
 
 Changelog.VERSIONS = {
+    {
+        Version = "3.5.0",
+        Date = "2026-08-19",
+        Changes = {
+            { "Added", "Fly di tab Player dengan 3 method: CFrame Fly, Velocity Fly, Align Fly (+ speed, vertical, keybind F, tombol up/down mobile)" },
+            { "Added", "Groupbox Universal / Tools di tab Player: Freeze, Spin, Click Teleport, Sit/Stand, Copy Position" },
+            { "Added", "Button Checkpoint Finder (execute script NekoCpFinder_v2 langsung dari executor)" },
+            { "Added", "Server: Hop random, Auto Server Hop timer, Auto hop kalau server hampir full, Copy JobId/PlaceId/Join Script, Join by JobId, Leave Game" },
+            { "Added", "Visuals: Disable Post FX, No Shadows, Camera FOV, Time of Day, Max Zoom, Clear Sky, X-Ray, Remove Textures" },
+            { "Changed", "Tab Teleport diganti nama jadi Main" },
+            { "Removed", "Watermark part \"Nekomaru Hub | Teleport Saver\"" },
+            { "Removed", "Tab Vehicle + fitur Vehicle Fly" },
+        },
+    },
     {
         Version = "3.3.0",
         Date = "2026-08-08",
@@ -147,4 +161,3 @@ function Changelog.Init(ctx)
 end
 
 return Changelog
-

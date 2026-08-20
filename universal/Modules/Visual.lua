@@ -111,6 +111,109 @@ function Visual.Init(ctx)
         end,
     })
 
+    -- ---------- Post FX / Camera ----------
+    local CamBox = Tabs.Visuals:AddLeftGroupbox("Camera & Post FX", "camera")
+
+    CamBox:AddToggle("no_postfx", {
+        Text = "Disable Post FX (blur, bloom, dll)",
+        Default = false,
+        Callback = function(v)
+            pcall(function()
+                for _, fx in ipairs(Lighting:GetDescendants()) do
+                    if fx:IsA("BlurEffect") or fx:IsA("BloomEffect") or fx:IsA("SunRaysEffect")
+                        or fx:IsA("ColorCorrectionEffect") or fx:IsA("DepthOfFieldEffect") then
+                        fx.Enabled = not v
+                    end
+                end
+            end)
+        end,
+    })
+
+    CamBox:AddToggle("no_shadows", {
+        Text = "No Shadows",
+        Default = false,
+        Callback = function(v)
+            pcall(function() Lighting.GlobalShadows = not v end)
+        end,
+    })
+
+    CamBox:AddSlider("cam_fov", {
+        Text = "Camera FOV",
+        Default = 70, Min = 30, Max = 120, Rounding = 0,
+        Callback = function(v)
+            pcall(function() workspace.CurrentCamera.FieldOfView = v end)
+        end,
+    })
+
+    CamBox:AddSlider("clock_time", {
+        Text = "Time of Day",
+        Default = 14, Min = 0, Max = 24, Rounding = 1,
+        Callback = function(v)
+            pcall(function() Lighting.ClockTime = v end)
+        end,
+    })
+
+    CamBox:AddSlider("zoom_distance", {
+        Text = "Max Zoom Distance",
+        Default = 128, Min = 10, Max = 2000, Rounding = 0,
+        Callback = function(v)
+            pcall(function() ctx.Services.LocalPlayer.CameraMaxZoomDistance = v end)
+        end,
+    })
+
+    -- ---------- World ----------
+    local WorldBox = Tabs.Visuals:AddLeftGroupbox("World", "globe")
+
+    WorldBox:AddToggle("no_sky", {
+        Text = "Clear Sky (hapus skybox custom)",
+        Default = false,
+        Callback = function(v)
+            pcall(function()
+                for _, sky in ipairs(Lighting:GetChildren()) do
+                    if sky:IsA("Sky") then sky.Parent = v and nil or sky.Parent end
+                end
+            end)
+        end,
+    })
+
+    WorldBox:AddToggle("xray", {
+        Text = "X-Ray (dinding transparan)",
+        Default = false,
+        Callback = function(v)
+            pcall(function()
+                for _, part in ipairs(workspace:GetDescendants()) do
+                    if part:IsA("BasePart") and not part:IsDescendantOf(ctx.Services.Players) then
+                        local isChar = false
+                        for _, pl in ipairs(ctx.Services.Players:GetPlayers()) do
+                            if pl.Character and part:IsDescendantOf(pl.Character) then isChar = true; break end
+                        end
+                        if not isChar then
+                            if v then
+                                part:SetAttribute("NHOldTrans", part.Transparency)
+                                part.Transparency = 0.6
+                            else
+                                local old = part:GetAttribute("NHOldTrans")
+                                if old then part.Transparency = old end
+                            end
+                        end
+                    end
+                end
+            end)
+        end,
+    })
+
+    WorldBox:AddButton({
+        Text = "Remove Textures & Decals",
+        Func = function()
+            pcall(function()
+                for _, v in ipairs(workspace:GetDescendants()) do
+                    if v:IsA("Decal") or v:IsA("Texture") then v:Destroy() end
+                end
+            end)
+            notify("Texture & decal dihapus", 2)
+        end,
+    })
+
     return V
 end
 

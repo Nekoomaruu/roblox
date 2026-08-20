@@ -17,16 +17,19 @@ function UI.Init(ctx)
     })
 
     local Tabs = {
-        Teleport  = Window:AddTab("Teleport", "map-pin"),
+        Main      = Window:AddTab("Main", "map-pin"),
         Player    = Window:AddTab("Player", "user"),
         Visuals   = Window:AddTab("Visuals", "eye"),
-        Vehicle   = Window:AddTab("Vehicle", "car"),
         Server    = Window:AddTab("Server", "server"),
         AutoAim   = Window:AddTab("Auto Aim", "crosshair"),
         SelfAlert = Window:AddTab("Self Alert", "shield-alert"),
         Info      = Window:AddTab("Info", "info"),
+        Changelog = Window:AddTab("Changelog", "scroll-text"),
         Settings  = Window:AddTab("Settings", "settings"),
     }
+
+    -- alias: module Teleport masih pakai Tabs.Teleport
+    Tabs.Teleport = Tabs.Main
 
     return { Window = Window, Tabs = Tabs }
 end

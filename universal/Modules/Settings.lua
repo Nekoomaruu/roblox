@@ -13,8 +13,8 @@ function Settings.Init(ctx)
     local ThemeManager = ctx.ThemeManager
     local SaveManager = ctx.SaveManager
 
-    safeMethod(Library, "SetWatermarkVisibility", true)
-    safeMethod(Library, "SetWatermark", "Nekomaru Hub | Teleport Saver")
+    -- Watermark part "Nekomaru Hub | Teleport Saver" dimatikan (permintaan user)
+    safeMethod(Library, "SetWatermarkVisibility", false)
 
     Library.KeyTab = Tabs.Settings
     local AboutBox = Tabs.Settings:AddLeftGroupbox("About", "info")
