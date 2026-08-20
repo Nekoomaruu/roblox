@@ -24,7 +24,6 @@ TeleportSaver
 │   ├── Player.lua           # speed, jump, inf jump, noclip, misc
 │   ├── Visual.lua           # fullbright, fog, fps boost
 │   ├── ESP.lua
-│   ├── Vehicle.lua
 │   ├── Server.lua           # anti-afk, rejoin, server hop
 │   ├── Aimbot.lua           # aimlock + FOV circle
 │   ├── Hitbox.lua
@@ -40,7 +39,7 @@ TeleportSaver
 
 ## Fitur
 
-### Teleport
+### Main (Teleport)
 - Save posisi tanpa batas, nama custom atau default `Cp 1`, `Cp 2`, ...
 - Teleport manual ke checkpoint, rename, delete, clear all
 - **Play** dari checkpoint pertama sampai terakhir
@@ -52,16 +51,21 @@ TeleportSaver
 
 ### Player
 Walk speed, jump power, infinite jump, noclip, reset character & camera,
-anti-fling, anti-void, anti-fall damage.
+anti-fling, anti-void, anti-fall damage, teleport to player.
+**Fly** 3 method (CFrame Fly / Velocity Fly / Align Fly) + speed, vertical, keybind F.
+**Universal / Tools**: Checkpoint Finder (execute NekoCpFinder_v2), freeze,
+spin, click teleport, sit/stand, copy position.
 
 ### Visuals
-Player ESP (box/name/distance), fullbright, fog control, FPS boost (low graphics).
+Player ESP (box/name/distance), fullbright, fog control, FPS boost (low graphics),
+disable post FX, no shadows, camera FOV, time of day, max zoom, clear sky, x-ray,
+remove textures & decals.
 
-### Vehicle
-Vehicle fly + kontrol kecepatan.
 
 ### Server
-Anti-AFK, rejoin, server hop.
+Anti-AFK, auto rejoin, rejoin now, server hop (normal / low player / random),
+auto server hop timer, auto hop kalau server hampir full, copy JobId/PlaceId/join
+script, join by JobId, leave game.
 
 ### Auto Aim
 Aimlock (smoothness, prediction, wall check, team check), FOV circle dengan
