@@ -205,6 +205,76 @@ local function ModelsOf(provider)
     return Providers[provider] and Providers[provider].Models or {}
 end
 
+local function DoRequest(options)
+    options.Timeout = Config.Timeout
+    local ok, res = pcall(httpRequest, options)
+    if not ok then return nil, "Request gagal: " .. tostring(res) end
+    if not res then return nil, "Tidak ada respons dari server." end
+
+    local body = res.Body or res.body
+    local status = res.StatusCode or res.Status or res.status_code or 0
+    if not body or body == "" then
+        return nil, "Respons kosong dari server (status " .. tostring(status) .. ")."
+    end
+    return body, nil, status
+end
+
+local function ResolveAvailableModel()
+    local url, headers
+    if Config.Provider == "Google AI Studio" then
+        url = "https://generativelanguage.googleapis.com/v1beta/models"
+        headers = { ["x-goog-api-key"] = Config.ApiKey }
+    elseif Config.Provider == "Groq" then
+        url = "https://api.groq.com/openai/v1/models"
+        headers = { ["Authorization"] = "Bearer " .. Config.ApiKey }
+    else
+        Config.Model = ModelsOf(Config.Provider)[1] or ""
+        return Config.Model ~= "", Config.Model ~= "" and nil or "Daftar model kosong."
+    end
+
+    local body, requestError = DoRequest({ Url = url, Method = "GET", Headers = headers })
+    if not body then return false, requestError end
+
+    local decoded
+    local okDecode, decodeError = pcall(function()
+        decoded = HttpService:JSONDecode(body)
+    end)
+    if not okDecode then return false, "Daftar model bukan JSON: " .. tostring(decodeError) end
+    if decoded.error then
+        local message = type(decoded.error) == "table" and (decoded.error.message or decoded.error.code) or decoded.error
+        return false, "API error: " .. tostring(message)
+    end
+
+    local available = {}
+    if Config.Provider == "Google AI Studio" then
+        for _, model in ipairs(decoded.models or {}) do
+            local supportsGenerate = false
+            for _, method in ipairs(model.supportedGenerationMethods or {}) do
+                if method == "generateContent" then supportsGenerate = true break end
+            end
+            if supportsGenerate and model.name then
+                available[model.name:gsub("^models/", "")] = true
+            end
+        end
+    else
+        for _, model in ipairs(decoded.data or {}) do
+            if model.id then available[model.id] = true end
+        end
+    end
+
+    for _, preferred in ipairs(ModelsOf(Config.Provider)) do
+        if available[preferred] then
+            Config.Model = preferred
+            return true
+        end
+    end
+    for model in pairs(available) do
+        Config.Model = model
+        return true
+    end
+    return false, "Tidak ada model chat yang tersedia untuk API key ini."
+end
+
 --==================================================================
 -- CORE: SEND MESSAGE
 --==================================================================
@@ -238,22 +308,8 @@ local function AskAI(userText)
         Headers = req.Headers,
         Body = HttpService:JSONEncode(req.Body),
     }
-
-    -- Nama opsi timeout berbeda-beda antar executor; Delta mengabaikannya
-    -- bila tidak didukung, jadi request tetap dapat berjalan.
-    requestOptions.Timeout = Config.Timeout
-
-    local ok, res = pcall(httpRequest, requestOptions)
-
-    if not ok then return nil, "Request gagal: " .. tostring(res) end
-    if not res then return nil, "Tidak ada respons dari server." end
-
-    -- Executor tidak seragam: ada yang memakai Body/StatusCode, ada body/Status.
-    local responseBody = res.Body or res.body
-    local statusCode = res.StatusCode or res.Status or res.status_code or 0
-    if not responseBody or responseBody == "" then
-        return nil, "Respons kosong dari server (status " .. tostring(statusCode) .. ")."
-    end
+    local responseBody, requestError, statusCode = DoRequest(requestOptions)
+    if not responseBody then return nil, requestError end
 
     local decoded
     local okDecode, err = pcall(function()
@@ -335,11 +391,17 @@ LoginBox:AddButton({
             return Library:Notify("API key tidak boleh kosong!", 4)
         end
         Config.ApiKey = Config.ApiKey:gsub("^%s+", ""):gsub("%s+$", "")
-        Config.Model = ModelsOf(Config.Provider)[1] or ""
 
         Busy = true
-        Library:Notify(("Mengetes %s (%s)..."):format(Config.Provider, Config.Model), 4)
+        Library:Notify("Memeriksa key dan model yang tersedia...", 4)
         task.spawn(function()
+            local modelReady, modelError = ResolveAvailableModel()
+            if not modelReady then
+                Busy = false
+                return Library:Notify("Login gagal: " .. tostring(modelError), 8)
+            end
+
+            Library:Notify(("Mengetes %s (%s)..."):format(Config.Provider, Config.Model), 4)
             local reply, err = AskAI("Balas hanya dengan kata: OK")
             Busy = false
             if not reply then
